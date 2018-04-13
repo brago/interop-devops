@@ -48,8 +48,11 @@ dfsp_pg_user: dfspadmin
 dfsp_pg_pass: dfsppass
 
 #Other accounts
-kibana_user: kibanaadmin
-kibana_pass: l1p
+elasticpass: l1ppass
+kibanapass: l1ppass
+logstashpass: l1ppass
+# kibana_user: kibanaadmin
+# kibana_pass: l1p
 cdir_pass: cVq8iFqaLuHy8jjKuA
 cleg_pass: cVq8iFqaLuHy8jjKuA
 ceur_pass: cVq8iFqaLuHy8jjKuA

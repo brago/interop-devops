@@ -23,6 +23,7 @@
       {{ local_dfsp1.stdout }}  dfsp1
       {{ local_dfsp2.stdout }}  dfsp2
       {{ local_ist.stdout }}  ist
+      127.0.0.1   localhost
 
 - name: Build host groups
   add_host:

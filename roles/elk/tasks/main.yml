@@ -16,13 +16,16 @@
     - name: Get Elasticsearch package
       become: yes
       get_url:
-        url: https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-5.4.3.deb
-        dest: ~/elasticsearch-5.4.3.deb
+        url: https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-6.2.3.deb
+        # url: https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-5.4.3.deb
+        dest: ~/elasticsearch-6.2.3.deb
+        # dest: ~/elasticsearch-5.4.3.deb
 
     - name: Install Elasticsearch
       become: yes
       apt:
-        deb: ~/elasticsearch-5.4.3.deb
+        deb: ~/elasticsearch-6.2.3.deb
+        # deb: ~/elasticsearch-5.4.3.deb
 
     - name: Configure Elasticsearch
       lineinfile:
@@ -38,17 +41,37 @@
     - name: Restart Elasticsearch
       service:
         name: elasticsearch
-        state:  restarted
+        state: restarted
 
+    - name: Get X-Pack package
+      become: yes
+      get_url:
+        url: https://artifacts.elastic.co/downloads/packs/x-pack/x-pack-6.2.3.zip
+        dest: ~/x-pack-6.2.3.zip
+    
+    - name: Install X-Pack for Elasticsearch
+      become: yes
+      # --batch option automatically grants needed permissions and bypasses install prompts
+      command: /usr/share/elasticsearch/bin/elasticsearch-plugin install x-pack --batch
+      # command: /usr/share/elasticsearch/bin/elasticsearch-plugin install file:///root/x-pack-6.2.3.zip --batch
+    
+    - name: Restart Elasticsearch
+      service:
+        name: elasticsearch
+        state: restarted
+    
     - name: Download Kibana
       get_url:
-        url: https://artifacts.elastic.co/downloads/kibana/kibana-5.4.3-amd64.deb
-        dest: ~/kibana-5.4.3-amd64.deb
+        url: https://artifacts.elastic.co/downloads/kibana/kibana-6.2.3-amd64.deb
+        # url: https://artifacts.elastic.co/downloads/kibana/kibana-5.4.3-amd64.deb
+        dest: ~/kibana-6.2.3-amd64.deb
+        # dest: ~/kibana-5.4.3-amd64.deb
 
     - name: Install Kibana
       become: yes
       apt:
-        deb: ~/kibana-5.4.3-amd64.deb
+        deb: ~/kibana-6.2.3-amd64.deb
+        # deb: ~/kibana-5.4.3-amd64.deb
 
     - name: Configure Kibana
       replace:
@@ -72,6 +95,16 @@
         path: /etc/kibana/kibana.yml
         regexp: '#elasticsearch.url: "http://localhost:9200"'
         replace: 'elasticsearch.url: "http://localhost:9200"'
+
+    - replace:
+        path: /etc/kibana/kibana.yml
+        regexp: '^#elasticsearch.username: "user"'
+        replace: 'elasticsearch.username: "kibana"'
+    
+    - replace:
+        path: /etc/kibana/kibana.yml
+        regexp: '^#elasticsearch.password: "pass"'
+        replace: 'elasticsearch.password: "{{kibanapass}}"'
 
     - copy:
         src: artifacts/kibana
@@ -198,10 +231,15 @@
                  }
                }
              }'"
-
+          
+    - name: Restart Kibana
+      service:
+        name: kibana
+        state:  restarted
+    
     # Pre-create the nginx account and also install apache2-utils for htpasswd
     - name: Pre-install nginx user
-      #shell: sudo adduser --system --no-create-home --shell /bin/false --group --disabled-login nginx
+      # shell: sudo adduser --system --no-create-home --shell /bin/false --group --disabled-login nginx
       become: yes
       user:
         name: nginx
@@ -214,13 +252,14 @@
       apt:
         name: nginx
         state: present
-
-    - name: Setup the Kibana user in NGINX
-      htpasswd:
-        path: /etc/nginx/htpasswd.users
-        name: "{{ kibana_user }}"
-        password: "{{ kibana_pass }}"
-        state: present
+    
+    # Removed because ELK x-pack manages security now
+    # - name: Setup the Kibana user in NGINX
+    #   htpasswd:
+    #     path: /etc/nginx/htpasswd.users
+    #     name: "{{ kibana_user }}"
+    #     password: "{{ kibana_pass }}"
+    #     state: present
 
     - name: Copy NGINX config files over to the server
       copy:
@@ -240,48 +279,92 @@
         name: nginx
         state: restarted
 
-    - name:  Install Logstash
-      get_url:
-        url: https://artifacts.elastic.co/downloads/logstash/logstash-5.4.3.deb
-        dest: ~/logstash-5.4.3.deb
-
-    - apt:
-        deb: ~/logstash-5.4.3.deb
-
-    - name: Configure Logstash
-      copy:
-        src: artifacts/log-pipeline.conf
-        dest: /etc/logstash/conf.d
-
-    - copy:
-        src: artifacts/logstash
-        dest: /etc/logrotate.d/
-
-
-    - name:  Install workaround for the awesome print bug
+    - name: Configure Built-in Users - elastic, kibana and logstash_system
       become: yes
-      git:
-        repo: 'git://github.com/awesome-print/awesome_print.git'
-        dest: /root/awesome_print
-
-    - shell: cp -r /root/awesome_print/lib/awesome_print/* /usr/share/logstash/vendor/bundle/jruby/1.9/gems/awesome_print-1.8.0/lib/awesome_print
-      become: yes
-
-    - shell: rm -rf /root/awesome_print
-      become: yes
-
-    - name: Restart Logstash
+      expect:
+        command: /usr/share/elasticsearch/bin/x-pack/setup-passwords interactive
+        responses:
+          'Please confirm that you would like to continue \[y/N\]': 'y'
+          'Enter password for \[elastic\]:': "{{ elasticpass }}"
+          'Reenter password for \[elastic\]:': "{{ elasticpass }}"
+          'Enter password for \[kibana\]:': "{{ kibanapass }}"
+          'Reenter password for \[kibana\]:': "{{ kibanapass }}"
+          'Enter password for \[logstash_system\]:': "{{ logstashpass }}"
+          'Reenter password for \[logstash_system\]:': "{{ logstashpass }}"
+    
+    - name: Restart Elasticsearch
       service:
-        name: logstash
+        name: elasticsearch
         state: restarted
+    
+    # Installation for Kibana x-pack takes several minutes
+    - name: Install X-Pack for Kibana
+      become: yes
+      command: /usr/share/kibana/bin/kibana-plugin install file:///root/x-pack-6.2.3.zip
+    #  command: sudo -u kibana /usr/share/kibana/bin/kibana-plugin install file:///root/x-pack-6.2.3.zip
+
+    - name: Restart Kibana
+      service:
+        name: kibana
+        state:  restarted
+
+    # - name:  Install Logstash
+    #   get_url:
+    #     url: https://artifacts.elastic.co/downloads/logstash/logstash-6.2.3.deb
+    #     ##url: https://artifacts.elastic.co/downloads/logstash/logstash-5.4.3.deb
+    #     dest: ~/logstash-6.2.3.deb
+    #     ##dest: ~/logstash-5.4.3.deb
+
+    # - apt:
+    #     deb: ~/logstash-6.2.3.deb
+    #     ##deb: ~/logstash-5.4.3.deb
+
+    # - name: Configure Logstash
+    #   copy:
+    #     src: artifacts/log-pipeline.conf
+    #     dest: /etc/logstash/conf.d
+
+    # - copy:
+    #     src: artifacts/logstash
+    #     dest: /etc/logrotate.d/
+
+    # - name:  Install workaround for the awesome print bug
+    #   become: yes
+    #   git:
+    #     repo: 'git://github.com/awesome-print/awesome_print.git'
+    #     dest: /root/awesome_print
+
+    #- shell: cp -r /root/awesome_print/lib/awesome_print/* /usr/share/logstash/vendor/bundle/jruby/1.9/gems/awesome_print-1.8.0/lib/awesome_print
+    # - shell: cp -r /root/awesome_print/lib/awesome_print/* /usr/share/logstash/vendor/bundle/jruby/2.3.0/gems/awesome_print-1.8.0/lib/awesome_print  
+    #   become: yes
+
+    # - shell: rm -rf /root/awesome_print
+    #   become: yes
+
+    # - name: Restart Logstash
+    #   service:
+    #     name: logstash
+    #     state: restarted
+    
+    # - name: Install X-Pack for Logstash
+    #   become: yes
+    #   command: /usr/share/logstash/bin/logstash-plugin install file:///root/x-pack-6.2.3.zip
+    
+    # - name: Restart Logstash
+    #   service:
+    #     name: logstash
+    #     state: restarted
     
     - name:  Install Metricbeat
       get_url: 
-        url: https://artifacts.elastic.co/downloads/beats/metricbeat/metricbeat-5.4.3-amd64.deb
-        dest: ~/metricbeat-5.4.3-amd64.deb
+        url: https://artifacts.elastic.co/downloads/beats/metricbeat/metricbeat-6.2.3-amd64.deb
+        # url: https://artifacts.elastic.co/downloads/beats/metricbeat/metricbeat-5.4.3-amd64.deb
+        dest: ~/metricbeat-6.2.3-amd64.deb
+        # dest: ~/metricbeat-5.4.3-amd64.deb
 
     - apt:
-        deb: ~/metricbeat-5.4.3-amd64.deb
+        deb: ~/metricbeat-6.2.3-amd64.deb
+        # deb: ~/metricbeat-5.4.3-amd64.deb
 
     - name: Restart Metricbeat
       service:
@@ -290,13 +373,19 @@
     
     - name:  Install Heartbeat
       get_url: 
-        url: https://artifacts.elastic.co/downloads/beats/heartbeat/heartbeat-5.4.3-amd64.deb
-        dest: ~/heartbeat-5.4.3-amd64.deb
+        url: https://artifacts.elastic.co/downloads/beats/heartbeat/heartbeat-6.2.3-amd64.deb
+        # url: https://artifacts.elastic.co/downloads/beats/heartbeat/heartbeat-5.4.3-amd64.deb
+        dest: ~/heartbeat-6.2.3-amd64.deb
+        # dest: ~/heartbeat-5.4.3-amd64.deb
 
     - apt:
-        deb: ~/heartbeat-5.4.3-amd64.deb
+        deb: ~/heartbeat-6.2.3-amd64.deb
+        # deb: ~/heartbeat-5.4.3-amd64.deb
 
+    # Service name changed with update to 6.2
     - name: Restart Heartbeat
       service:
-        name: heartbeat
+        name: heartbeat-elastic
+        # name: heartbeat
         state:  restarted
+       

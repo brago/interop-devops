@@ -1,6 +1,7 @@
 - name: Ensure all software and dependencies are installed
   raw: sudo apt-get -y install "{{ item }}"
   with_items:
+    - git
     - dos2unix
     - python-pip
     - python-passlib
@@ -10,6 +11,7 @@
     name: "{{ item }}"
     state: present
   with_items:
+    - pexpect
     - docker-py
     - awscli
 
